@@ -41,31 +41,39 @@ app.post("/identify", async (req, res) => {
   }
 });
 
-function download(url, out) {
+// TikTok frequently refuses its default API host from datacenter IPs ("Video not
+// available, status code 0"). Retrying against alternate API hosts is the standard
+// cookie-free workaround, so for TikTok we try a few before giving up.
+const TIKTOK_HOSTS = [
+  "api22-normal-c-useast2a.tiktokv.com",
+  "api16-normal-c-useast1a.tiktokv.com",
+  "api19-normal-c-alisg.tiktokv.com",
+];
+
+function baseArgs(out, url, extra) {
+  return [
+    "-f", "best[height<=720][ext=mp4]/best[height<=720]/best/mp4/b",
+    "--merge-output-format", "mp4",
+    "--max-filesize", "60m",
+    "--no-playlist",
+    "--no-warnings",
+    "--no-part",
+    "--socket-timeout", "15",
+    "--retries", "3",
+    "--fragment-retries", "3",
+    "--concurrent-fragments", "4",
+    "--force-ipv4",
+    "--user-agent",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    ...(extra || []),
+    "-o", out,
+    url,
+  ];
+}
+
+function runYtDlp(args) {
   return new Promise((resolve, reject) => {
-    const args = [
-      // format: prefer a <=720p mp4, fall back progressively, finally anything
-      "-f", "best[height<=720][ext=mp4]/best[height<=720]/best/mp4/b",
-      "--merge-output-format", "mp4",
-      "--max-filesize", "60m",
-      "--no-playlist",
-      "--no-warnings",
-      "--no-part",
-      // fail fast instead of hanging: cap each socket op + bound the retries
-      "--socket-timeout", "15",
-      "--retries", "3",
-      "--fragment-retries", "3",
-      "--concurrent-fragments", "4",
-      // cloud hosts often have flaky IPv6 routing that makes downloads stall
-      "--force-ipv4",
-      // a real mobile UA helps with TikTok/IG anti-bot
-      "--user-agent",
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-      "-o", out,
-      url,
-    ];
-    // hard wall at 60s so a stuck download surfaces a clean error instead of an endless spin
-    execFile("yt-dlp", args, { timeout: 60000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 * 16 }, (err, stdout, stderr) => {
+    execFile("yt-dlp", args, { timeout: 60000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 * 16 }, (err, _stdout, stderr) => {
       if (stderr) console.log("yt-dlp stderr:", String(stderr).slice(0, 600));
       if (err) {
         if (err.killed) return reject(new Error("yt-dlp timed out (60s) fetching the video"));
@@ -74,6 +82,26 @@ function download(url, out) {
       resolve();
     });
   });
+}
+
+async function download(url, out) {
+  const isTikTok = /tiktok\.com|vt\.tiktok|vm\.tiktok/i.test(url);
+  // For non-TikTok, one plain attempt. For TikTok, try the default first, then each alt host.
+  const attempts = isTikTok
+    ? [null, ...TIKTOK_HOSTS].map((h) => (h ? ["--extractor-args", "tiktok:api_hostname=" + h] : []))
+    : [[]];
+  let lastErr = null;
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      console.log("download attempt", i + 1, "of", attempts.length, isTikTok ? "(tiktok)" : "");
+      await runYtDlp(baseArgs(out, url, attempts[i]));
+      return; // success
+    } catch (e) {
+      lastErr = e;
+      console.log("attempt", i + 1, "failed:", String(e).slice(0, 200));
+    }
+  }
+  throw lastErr || new Error("download failed");
 }
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Cinema downloader listening on " + PORT));
