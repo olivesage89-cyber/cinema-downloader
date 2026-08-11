@@ -8,6 +8,13 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 const SUPA_FN = process.env.SUPA_FN || "https://pujsrxpveyecbogqnmad.supabase.co/functions/v1/Identify";
 const SUPA_ANON = process.env.SUPA_ANON || "";
+// Residential proxy (set as a Railway env var; keep it secret). Used to get a clean
+// (non-datacenter) IP so YouTube stops throwing "confirm you're not a bot".
+// Format e.g.: http://user:pass@host:port  or  socks5://user:pass@host:port
+const PROXY_URL = process.env.PROXY_URL || "";
+// By default the proxy is used for YouTube only (where it's needed) to save proxy bandwidth,
+// since Instagram/TikTok work fine on the direct connection. Set PROXY_ALL=1 to route all.
+const PROXY_ALL = process.env.PROXY_ALL === "1" || process.env.PROXY_ALL === "true";
 app.get("/", (_req, res) => res.send("Cinema downloader is up"));
 app.post("/identify", async (req, res) => {
   const url = req.body && req.body.url;
@@ -91,13 +98,16 @@ const YT_ARGS = [
 async function download(url, out) {
   const isTikTok = /tiktok\.com|vt\.tiktok|vm\.tiktok/i.test(url);
   const isYouTube = /youtube\.com|youtu\.be/i.test(url);
+  // Use the residential proxy for YouTube (needs a clean IP), or for everything if PROXY_ALL.
+  const px = (PROXY_URL && (isYouTube || PROXY_ALL)) ? ["--proxy", PROXY_URL] : [];
+  console.log("download", isYouTube ? "(youtube)" : isTikTok ? "(tiktok)" : "(other)", px.length ? "via proxy" : "direct");
   // TikTok: try default host then alternates. YouTube: its own flag set. Everything else
-  // (Instagram, etc.): the clean args that work.
+  // (Instagram, etc.): the clean args that work. Proxy args appended where applicable.
   const attempts = isTikTok
-    ? [null, ...TIKTOK_HOSTS].map((h) => (h ? ["--extractor-args", "tiktok:api_hostname=" + h] : []))
+    ? [null, ...TIKTOK_HOSTS].map((h) => (h ? ["--extractor-args", "tiktok:api_hostname=" + h] : []).concat(px))
     : isYouTube
-    ? [YT_ARGS]
-    : [[]];
+    ? [YT_ARGS.concat(px)]
+    : [[].concat(px)];
   let lastErr = null;
   for (let i = 0; i < attempts.length; i++) {
     try {
