@@ -50,21 +50,16 @@ const TIKTOK_HOSTS = [
   "api19-normal-c-alisg.tiktokv.com",
 ];
 
+// Kept intentionally close to the ORIGINAL working args (Instagram/YouTube worked with
+// these). No custom user-agent or forced-IPv4 — those broke Instagram (pushed it to a
+// login wall). Only TikTok gets extra args (alternate API host), passed via `extra`.
 function baseArgs(out, url, extra) {
   return [
-    "-f", "best[height<=720][ext=mp4]/best[height<=720]/best/mp4/b",
+    "-f", "best[height<=720][ext=mp4]/best[height<=720]/best",
     "--merge-output-format", "mp4",
     "--max-filesize", "60m",
     "--no-playlist",
     "--no-warnings",
-    "--no-part",
-    "--socket-timeout", "15",
-    "--retries", "3",
-    "--fragment-retries", "3",
-    "--concurrent-fragments", "4",
-    "--force-ipv4",
-    "--user-agent",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
     ...(extra || []),
     "-o", out,
     url,
