@@ -79,11 +79,25 @@ function runYtDlp(args) {
   });
 }
 
+// YouTube on a datacenter IP needs forced-IPv4 + a browser UA (IPv6 gets throttled/blocked),
+// and an alternate player client helps. These SAME flags break Instagram/TikTok, so they're
+// applied to YouTube only.
+const YT_ARGS = [
+  "--force-ipv4",
+  "--user-agent",
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  "--extractor-args", "youtube:player_client=ios,web",
+];
+
 async function download(url, out) {
   const isTikTok = /tiktok\.com|vt\.tiktok|vm\.tiktok/i.test(url);
-  // For non-TikTok, one plain attempt. For TikTok, try the default first, then each alt host.
+  const isYouTube = /youtube\.com|youtu\.be/i.test(url);
+  // TikTok: try default host then alternates. YouTube: its own flag set. Everything else
+  // (Instagram, etc.): the clean args that work.
   const attempts = isTikTok
     ? [null, ...TIKTOK_HOSTS].map((h) => (h ? ["--extractor-args", "tiktok:api_hostname=" + h] : []))
+    : isYouTube
+    ? [YT_ARGS]
     : [[]];
   let lastErr = null;
   for (let i = 0; i < attempts.length; i++) {
